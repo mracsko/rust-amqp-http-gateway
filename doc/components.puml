@@ -1,0 +1,11 @@
+@startuml
+component "Message\nGenerator\n(wrk)" as msggen
+component "\nRabbitMQ\n" as rabbitmq
+component "Message\nProducer\n(amqp-producer)" as msgprod
+component "Message\nConsumer\n(amqp-consumer)" as msgcons
+component "HTTP\nSink\n(http-sink)" as sink
+msggen -> msgprod: HTTP\nPOST
+msgprod -> rabbitmq: AMQP\nPublish
+rabbitmq -> msgcons: AMQP\nConsume
+msgcons -> sink: HTTP\nPOST/PUT
+@enduml

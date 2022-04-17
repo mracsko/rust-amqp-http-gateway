@@ -1,0 +1,43 @@
+version: '3.8'
+services:
+  rabbitmq:
+    image: rabbitmq:3.9.14-management
+    ports:
+      - "15672:15672"
+  amqp-producer:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - "rabbitmq"
+    command: [ "wait-for-it","-t", "60", "rabbitmq:5672", "--", "amqp-producer" ]
+    environment:
+      - HTTP_ADDR=0.0.0.0:8080
+      - APP_DETAILED_VERSION=true
+  amqp-consumer:
+    build: .
+    ports:
+      - "8081:8080"
+    depends_on:
+      - "rabbitmq"
+      - "http-sink"
+    command: [ "wait-for-it","-t", "60", "http-sink:8080", "--", "wait-for-it","-t", "60", "rabbitmq:5672", "--", "amqp-consumer" ]
+    environment:
+      - HTTP_ADDR=0.0.0.0:8080
+      - WEBHOOK_ADDR=http://http-sink:8080/sink
+      - APP_DETAILED_VERSION=true
+      - AMQP_LOG_PER_REQUEST=10000
+  message-generator:
+    build: ./utils/wrk
+    depends_on:
+      - "amqp-producer"
+    command: [ "wait-for-it", "-t", "60", "amqp-producer:8080", "--", "wrk", "-t2", "-c10", "-d60s", "-s", "scripts/post-json.lua", "http://amqp-producer:8080/send" ]
+  http-sink:
+    build: .
+    ports:
+      - "8082:8080"
+    command: [ "http-sink" ]
+    environment:
+      - HTTP_ADDR=0.0.0.0:8080
+      - APP_DETAILED_VERSION=true
+      - HTTP_LOG_PER_REQUEST=10000
