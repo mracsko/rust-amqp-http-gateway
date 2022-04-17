@@ -5,8 +5,7 @@
 
 [license-badge]: https://img.shields.io/badge/license-MIT%20or%20Apache%202.0-blue
 [license-url]: https://github.com/mracsko/amqp-service/blob/master/LICENSE.md
-[dependencies-badge]: https://deps.rs/repo/github/mracsko/rust-amqp-http-gateway
-/status.svg
+[dependencies-badge]: https://deps.rs/repo/github/mracsko/rust-amqp-http-gateway/status.svg
 [dependencies-url]: https://deps.rs/repo/github/mracsko/rust-amqp-http-gateway
 
 AMQP/HTTP Gateway services for sending messages to RabbitMQ queue from HTTP endpoint or receiving messages and sending
