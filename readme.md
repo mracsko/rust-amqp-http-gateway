@@ -2,11 +2,14 @@
 
 [![MIT or Apache 2.0 licensed][license-badge]][license-url]
 [![Dependencies][dependencies-badge]][dependencies-url]
+[![Rust build][rust-build-badge]][rust-build-url]
 
 [license-badge]: https://img.shields.io/badge/license-MIT%20or%20Apache%202.0-blue
 [license-url]: https://github.com/mracsko/amqp-service/blob/master/LICENSE.md
 [dependencies-badge]: https://deps.rs/repo/github/mracsko/rust-amqp-http-gateway/status.svg
 [dependencies-url]: https://deps.rs/repo/github/mracsko/rust-amqp-http-gateway
+[rust-build-badge]: https://github.com/mracsko/rust-amqp-http-gateway/actions/workflows/rust.yml/badge.svg
+[rust-build-url]: https://github.com/mracsko/rust-amqp-http-gateway/actions/workflows/rust.yml
 
 AMQP/HTTP Gateway services for sending messages to RabbitMQ queue from HTTP endpoint or receiving messages and sending
 it to a webhook (HTTP POST/PUT).
