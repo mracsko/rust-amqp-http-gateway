@@ -2,18 +2,19 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use actix_web::{web, App, HttpServer};
+use actix_web::{App, HttpServer, web};
+use bb8::Pool;
+use bb8_lapin::LapinConnectionManager;
 use futures::StreamExt;
+use lapin::{Connection, Consumer};
 use lapin::options::{BasicAckOptions, BasicConsumeOptions, BasicRejectOptions};
 use lapin::types::FieldTable;
-use lapin::{Connection, Consumer};
 use log::info;
 use reqwest::Client;
+use serde_json::to_string;
 
-use amqp_service::bin_utils::{
-    init_amqp_conn_and_queue, init_http_settings, init_logging, init_version, read_positive_param,
-    AmqpSettings,
-};
+use amqp_service::amqp::AmqpConnectionPool;
+use amqp_service::bin_utils::{init_amqp_conn_pool, init_http_settings, init_logging, init_version, read_positive_param};
 use amqp_service::rest;
 use amqp_service::rest::{create_named_worker, HttpSettings};
 
@@ -35,24 +36,23 @@ async fn main() {
 
     let http_settings = init_http_settings(num_cpus::get_physical());
     let amqp_workers = read_positive_param("AMQP_WORKERS", num_cpus::get_physical());
-    let (conn, amqp_settings) = init_amqp_conn_and_queue().await;
+    let amqp_pool = init_amqp_conn_pool().await;
     let webhook_settings = init_webhook_settings();
     let log_per_request = init_amqp_log_per_request();
     let version_string = init_version_string(
         &http_settings,
-        &amqp_settings,
+        &amqp_pool,
         amqp_workers,
         log_per_request,
     );
 
     register_consumer(
-        &conn,
-        &amqp_settings.queue,
+        &amqp_pool,
         amqp_workers,
         &webhook_settings,
         log_per_request,
     )
-    .await;
+        .await;
 
     info!(target: "main", "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
 
@@ -66,9 +66,9 @@ async fn main() {
             }))
             .service(rest::version)
     })
-    .workers(http_settings.http_workers)
-    .bind(http_settings.http_addr)
-    .expect("Cannot bind HTTP server");
+        .workers(http_settings.http_workers)
+        .bind(http_settings.http_addr)
+        .expect("Cannot bind HTTP server");
 
     info!(target: "main", "Service inited in {:?}", start.elapsed());
 
@@ -79,8 +79,7 @@ async fn main() {
 }
 
 async fn register_consumer(
-    conn: &Connection,
-    queue: &str,
+    amqp_pool: &AmqpConnectionPool,
     amqp_workers: usize,
     webhook_settings: &WebhookSettings,
     log_threshold: u64,
@@ -93,48 +92,52 @@ async fn register_consumer(
 
     let client = reqwest::Client::new();
 
+    let use_post = webhook_settings.webhook_method_is_post;
     for i in 0..amqp_workers {
-        let channel = &conn
-            .create_channel()
-            .await
-            .expect("Cannot create AMQP channel.");
-        let consumer = channel
-            .basic_consume(
-                queue,
-                "consumer",
-                BasicConsumeOptions::default(),
-                FieldTable::default(),
-            )
-            .await
-            .expect("Cannot create AMQP consumer.");
-
+        let pool = amqp_pool.clone();
         let webhook_addr = webhook_settings.webhook_addr.clone();
-        let use_post = webhook_settings.webhook_method_is_post;
         let client = client.clone();
-
+        let queue = amqp_pool.queue_name.to_string();
         let worker_name = format!("consumer-amqp-{}", i + 1);
         tokio::spawn(async move {
             create_and_run_consumer(
-                consumer,
+                &amqp_pool,
+                &queue,
                 webhook_addr,
                 use_post,
                 client,
                 worker_name,
                 log_threshold,
             )
-            .await
+                .await
         });
     }
 }
 
 async fn create_and_run_consumer(
-    mut consumer: Consumer,
+    pool: &Pool<LapinConnectionManager>,
+    queue: &str,
     webhook_addr: String,
     use_post: bool,
     client: Client,
     worker_name: String,
     log_threshold: u64,
 ) {
+    let conn = pool.get().await.unwrap();
+    let channel = &conn
+        .create_channel()
+        .await
+        .expect("Cannot create AMQP channel.");
+    let mut consumer = channel
+        .basic_consume(
+            queue,
+            "consumer",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .expect("Cannot create AMQP consumer.");
+
     info!(
         target: &worker_name,
         "Consumer thread started, logging new line for each {log_threshold} messages..."
@@ -206,7 +209,7 @@ fn init_webhook_settings() -> WebhookSettings {
 
 fn init_version_string(
     http_settings: &HttpSettings,
-    amqp_settings: &AmqpSettings,
+    amqp_pool: &AmqpConnectionPool,
     amqp_workers: usize,
     log_per_request: u64,
 ) -> String {
@@ -216,7 +219,7 @@ fn init_version_string(
             "http_workers".to_string(),
             http_settings.http_workers.to_string(),
         ),
-        ("amqp_queue".to_string(), amqp_settings.queue.to_string()),
+        ("amqp_queue".to_string(), amqp_pool.queue_name.to_string()),
         ("amqp_workers".to_string(), amqp_workers.to_string()),
         (
             "amqp_log_per_request".to_string(),
