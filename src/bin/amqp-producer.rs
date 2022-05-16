@@ -6,30 +6,57 @@ use actix_web::{App, error, Error, HttpResponse, HttpServer, post, web};
 use futures_lite::StreamExt;
 use log::{error, info};
 
-use amqp_service::amqp::{AmqpConnectionPool, AmqpChannelWrapper};
-use amqp_service::bin_utils::{init_amqp_conn_pool, init_http_settings, init_logging, init_version};
+use amqp_service::amqp::{AmqpChannelWrapper, AmqpConnectionPool};
+use amqp_service::bin_utils::Properties;
 use amqp_service::rest;
 use amqp_service::rest::{create_named_worker, HttpSettings};
 
-const CARGO_BIN_NAME: &'static str = env!("CARGO_BIN_NAME");
+const CARGO_BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const MAX_SIZE: usize = 262_144; // max payload size is 256k
 
 struct HttpWorkerSettings {
     name: String,
 }
 
+struct ProducerProperties {
+    base: Properties,
+}
+
+impl ProducerProperties {
+    fn new() -> Self {
+        let base = Properties::new("main", "PROD");
+        ProducerProperties {
+            base
+        }
+    }
+
+    fn init_version_string(&self, http_settings: &HttpSettings, amqp_pool: &AmqpConnectionPool) -> String {
+        let additional_params: HashMap<String, String> = HashMap::from([
+            ("cores".to_string(), num_cpus::get_physical().to_string()),
+            (
+                "http_workers".to_string(),
+                http_settings.http_workers.to_string(),
+            ),
+            ("amqp_queue".to_string(), amqp_pool.queue_name.to_string()),
+        ]);
+        self.base.init_version(CARGO_BIN_NAME, additional_params)
+    }
+}
+
+
 #[tokio::main]
 async fn main() {
     let start = Instant::now();
-    init_logging();
+    let properties = ProducerProperties::new();
+    properties.base.init_logging();
 
-    info!(target: "main", "Service '{CARGO_BIN_NAME}' is starting...");
+    info!(target: &properties.base.log_target, "Service '{CARGO_BIN_NAME}' is starting...");
 
-    let http_settings = init_http_settings(num_cpus::get_physical());
-    let amqp_pool = init_amqp_conn_pool().await;
-    let version_string = init_version_string(&http_settings, &amqp_pool);
+    let http_settings = properties.base.init_http_settings_with_core_count();
+    let amqp_pool = properties.base.init_amqp_conn_pool().await;
+    let version_string = properties.init_version_string(&http_settings, &amqp_pool);
 
-    info!(target: "main", "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
+    info!(target: &properties.base.log_target, "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
 
     let worker_counter = Arc::new(Mutex::new(0));
     let server = HttpServer::new(move || {
@@ -48,25 +75,12 @@ async fn main() {
         .bind(http_settings.http_addr)
         .expect("Cannot bind HTTP server");
 
-    info!(target: "main", "Service inited in {:?}", start.elapsed());
+    info!(target: &properties.base.log_target, "Service inited in {:?}", start.elapsed());
 
     server
         .run()
         .await
         .expect("HTTP server could not be started");
-}
-
-fn init_version_string(http_settings: &HttpSettings, amqp_pool: &AmqpConnectionPool) -> String {
-    let additional_params: HashMap<String, String> = HashMap::from([
-        ("cores".to_string(), num_cpus::get_physical().to_string()),
-        (
-            "http_workers".to_string(),
-            http_settings.http_workers.to_string(),
-        ),
-        ("amqp_queue".to_string(), amqp_pool.queue_name.to_string()),
-    ]);
-    let version_string = init_version(&CARGO_BIN_NAME, additional_params);
-    version_string
 }
 
 #[post("/send")]
