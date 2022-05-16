@@ -141,12 +141,11 @@ async fn register_consumer(
         let webhook_addr = webhook_settings.webhook_addr.clone();
         let amqp_channel = amqp_pool.new_wrapper(&worker_name);
 
-        info!(target: &worker_name, "Consumer thread started...");
-
         tokio::spawn(async move {
             let mut consumer = amqp_channel.create_consumer();
-
             let client = reqwest::Client::new();
+
+            info!(target: &worker_name, "Consumer thread started...");
 
             while let Some(delivery) = consumer.receive_message_retry().await {
                 let request = {
