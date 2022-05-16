@@ -15,23 +15,6 @@ RabbitMQ delivers the messages to the amqp-consumer, that calls a webhook (http-
 * **Message consumer (amqp-consumer):** Custom service for consuming RabbitMQ messages and calling a webhook.
 * **Http Sink (http-sink):** Custom service for simulating a webhook. Receives and ignores HTTP requests.
 
-## Environment variables
-
-**Generic environment variables used by all custom services (amqp-producer, amqp-consumer, http-sink):**
-
-* **RUST_LOG:** Setting the log level the application. Directly
-  the [tracing_subscriber](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) crate is used, that in the
-  background is using [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. For details settings check the
-  documentation of [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. _Default log level: `info`_
-* **APP_DETAILED_VERSION:** Enabling or disabling detailed logging. If enabled, additional parameters are provided by
-  the `/version` endpoint. Needs to be a valid boolean value. _Default: `false`_
-* **HTTP_ADDR:** Bind address for Actix Web, in `host:port` format. Further details are available
-  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.bind). _Default
-  value: `127.0.0.1:8080`_
-* **HTTP_WORKERS:** Number of worker threads for Actix Web. Needs to be a positive integer. Further details are
-  available
-  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.workers).
-
 ## Third party services
 
 ### message-generator service
@@ -55,11 +38,23 @@ Custom service for receiving HTTP POST requests and publishing the body to Rabbi
 
 #### Environment variables
 
-Environment variables that are available beside the previously mentioned generic ones.
-
-* **HTTP_WORKERS:** _Default value is the number of CPU cores._
-* **AMQP_ADDR:** Connection string for AMQP (RabbitMQ) service. _Default value: `amqp://guest:guest@rabbitmq:5672/%2f`_
-* **AMQP_QUEUE:** The name of the AMQP queue that is used. If it does not exist it is created. _Default value: `main`_
+* **PROD_RUST_LOG:** Setting the log level the application. Directly
+  the [tracing_subscriber](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) crate is used, that in the
+  background is using [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. For details settings check the
+  documentation of [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. _Default log level: `info`_
+* **PROD_APP_DETAILED_VERSION:** Enabling or disabling detailed logging. If enabled, additional parameters are provided
+  by the `/version` endpoint. Needs to be a valid boolean value. _Default: `false`_
+* **PROD_HTTP_ADDR:** Bind address for Actix Web, in `host:port` format. Further details are available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.bind). _Default
+  value: `127.0.0.1:8080`_
+* **PROD_HTTP_WORKERS:** Number of worker threads for Actix Web. Needs to be a positive integer. Further details are
+  available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.workers).
+  _Default value is the number of CPU cores._ 
+* **PROD_AMQP_ADDR:** Connection string for AMQP (RabbitMQ) service. _Default
+  value: `amqp://guest:guest@rabbitmq:5672/%2f`_
+* **PROD_AMQP_QUEUE:** The name of the AMQP queue that is used. If it does not exist it is created. _Default
+  value: `main`_
 
 #### Endpoints
 
@@ -73,14 +68,27 @@ Custom service for consuming RabbitMQ messages and calling a webhook.
 
 #### Environment variables
 
-Environment variables that are available beside the previously mentioned generic ones.
-
-* **HTTP_WORKERS:** _Default value is `1`_
-* **AMQP_WORKERS:** Number of worker threads for spawned for listening on messages. Needs to be a positive integer.
+* **CONS_RUST_LOG:** Setting the log level the application. Directly
+  the [tracing_subscriber](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) crate is used, that in the
+  background is using [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. For details settings check the
+  documentation of [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. _Default log level: `info`_
+* **CONS_APP_DETAILED_VERSION:** Enabling or disabling detailed logging. If enabled, additional parameters are provided
+  by the `/version` endpoint. Needs to be a valid boolean value. _Default: `false`_
+* **CONS_HTTP_ADDR:** Bind address for Actix Web, in `host:port` format. Further details are available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.bind). _Default
+  value: `127.0.0.1:8080`_
+* **CONS_HTTP_WORKERS:** Number of worker threads for Actix Web. Needs to be a positive integer. Further details are
+  available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.workers).
+  _Default value is `1`_ 
+* **CONS_AMQP_WORKERS:** Number of worker threads for spawned for listening on messages. Needs to be a positive integer.
   _Default value is the number of CPU cores._
-* **AMQP_ADDR:** Connection string for AMQP (RabbitMQ) service. _Default value: `amqp://guest:guest@rabbitmq:5672/%2f`_
-* **AMQP_QUEUE:** The name of the AMQP queue that is used. If it does not exist it is created. _Default value: `main`_
-* **AMQP_LOG_PER_REQUEST:** Log a static text after the defined amount of messages received on an AMQP worker thread.
+* **CONS_AMQP_ADDR:** Connection string for AMQP (RabbitMQ) service. _Default
+  value: `amqp://guest:guest@rabbitmq:5672/%2f`_
+* **CONS_AMQP_QUEUE:** The name of the AMQP queue that is used. If it does not exist it is created. _Default
+  value: `main`_
+* **CONS_AMQP_LOG_PER_REQUEST:** Log a static text after the defined amount of messages received on an AMQP worker
+  thread.
   Needs to be non-negative integer. Set to `0` to disable this log. _Default value: `0`_
 
 #### Endpoints
@@ -96,8 +104,20 @@ Custom service for simulating a webhook. Receives and ignores HTTP requests.
 
 Environment variables that are available beside the previously mentioned generic ones.
 
-* **HTTP_WORKERS:** _Default value is the number of CPU cores._
-* **HTTP_LOG_PER_REQUEST:** Log a static text after the defined amount of messages received on a HTTP worker thread.
+* **SINK_RUST_LOG:** Setting the log level the application. Directly
+  the [tracing_subscriber](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) crate is used, that in the
+  background is using [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. For details settings check the
+  documentation of [env_logger](https://docs.rs/env_logger/0.9.0/env_logger/) crate. _Default log level: `info`_
+* **SINK_APP_DETAILED_VERSION:** Enabling or disabling detailed logging. If enabled, additional parameters are provided by
+  the `/version` endpoint. Needs to be a valid boolean value. _Default: `false`_
+* **SINK_HTTP_ADDR:** Bind address for Actix Web, in `host:port` format. Further details are available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.bind). _Default
+  value: `127.0.0.1:8080`_
+* **SINK_HTTP_WORKERS:** Number of worker threads for Actix Web. Needs to be a positive integer. Further details are
+  available
+  in [Actix Web Documentation](https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpServer.html#method.workers). 
+  _Default value is the number of CPU cores._
+* **SINK_HTTP_LOG_PER_REQUEST:** Log a static text after the defined amount of messages received on a HTTP worker thread.
   Needs to be non-negative integer. Set to `0` to disable this log. _Default value: `0`_
 
 #### Endpoints

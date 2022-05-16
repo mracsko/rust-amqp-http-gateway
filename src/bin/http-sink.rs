@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use actix_web::{post, put, web, App, HttpResponse, HttpServer};
+use actix_web::{App, HttpResponse, HttpServer, post, put, web};
 use log::info;
 
-use amqp_service::bin_utils::{init_http_settings, init_logging, init_version};
+use amqp_service::bin_utils::Properties;
 use amqp_service::rest;
 use amqp_service::rest::{create_named_worker, HttpSettings};
 
-const CARGO_BIN_NAME: &'static str = env!("CARGO_BIN_NAME");
+const CARGO_BIN_NAME: &str = env!("CARGO_BIN_NAME");
 
 struct HttpWorkerSettings {
     counter: Mutex<u64>,
@@ -17,17 +17,62 @@ struct HttpWorkerSettings {
     name: String,
 }
 
+struct SinkProperties {
+    base: Properties,
+}
+
+impl SinkProperties {
+    fn new() -> Self {
+        let base = Properties::new("main", "SINK");
+        SinkProperties {
+            base
+        }
+    }
+
+    fn init_version_string(&self, http_settings: &HttpSettings, log_per_request: u64) -> String {
+        let additional_params: HashMap<String, String> = HashMap::from([
+            ("cores".to_string(), num_cpus::get_physical().to_string()),
+            (
+                "http_log_per_request".to_string(),
+                log_per_request.to_string(),
+            ),
+            (
+                "http_workers".to_string(),
+                http_settings.http_workers.to_string(),
+            ),
+        ]);
+        self.base.init_version(CARGO_BIN_NAME, additional_params)
+    }
+
+    fn init_http_log_per_request(&self) -> u64 {
+        let key = self.base.prop_name("HTTP_LOG_PER_REQUEST");
+        let log_per_request = std::env::var(&key)
+            .unwrap_or_else(|_| "0".into())
+            .parse::<u64>()
+            .expect(
+                &format!("Cannot parse '{key}' environment variable. It needs to be a non-negative number.")
+                );
+
+        info!(target: &self.base.log_target, "Value for '{key}': {log_per_request}");
+
+        log_per_request
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let start = Instant::now();
-    init_logging();
-    info!(target: "main", "Service '{CARGO_BIN_NAME}' is starting...");
 
-    let http_settings = init_http_settings(num_cpus::get_physical());
-    let log_per_request = init_http_log_per_request();
-    let version_string = init_version_string(&http_settings, log_per_request);
+    let properties = SinkProperties::new();
+    properties.base.init_logging();
 
-    info!(target: "main", "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
+    info!(target: &properties.base.log_target, "Service '{CARGO_BIN_NAME}' is starting...");
+
+    let http_settings = properties.base.init_http_settings_with_core_count();
+    let log_per_request = properties.init_http_log_per_request();
+    let version_string = properties.init_version_string(&http_settings, log_per_request);
+
+    info!(target: &properties.base.log_target, "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
 
     let worker_counter = Arc::new(Mutex::new(0));
     let server = HttpServer::new(move || {
@@ -46,44 +91,16 @@ async fn main() {
             .service(sink_put)
             .service(sink_post)
     })
-    .workers(http_settings.http_workers)
-    .bind(http_settings.http_addr)
-    .expect("Cannot bind HTTP server");
+        .workers(http_settings.http_workers)
+        .bind(http_settings.http_addr)
+        .expect("Cannot bind HTTP server");
 
-    info!(target: "main", "Service inited in {:?}", start.elapsed());
+    info!(target: &properties.base.log_target, "Service inited in {:?}", start.elapsed());
 
     server
         .run()
         .await
         .expect("HTTP server could not be started");
-}
-
-fn init_version_string(http_settings: &HttpSettings, log_per_request: u64) -> String {
-    let additional_params: HashMap<String, String> = HashMap::from([
-        ("cores".to_string(), num_cpus::get_physical().to_string()),
-        (
-            "http_log_per_request".to_string(),
-            log_per_request.to_string(),
-        ),
-        (
-            "http_workers".to_string(),
-            http_settings.http_workers.to_string(),
-        ),
-    ]);
-    let version_string = init_version(&CARGO_BIN_NAME, additional_params);
-    version_string
-}
-
-fn init_http_log_per_request() -> u64 {
-    let log_per_request = std::env::var("HTTP_LOG_PER_REQUEST")
-        .unwrap_or_else(|_| "0".into())
-        .parse::<u64>()
-        .expect(
-            "Cannot parse 'HTTP_LOG_PER_REQUEST' environment variable. It needs to be a non-negative number.",
-        );
-
-    info!(target: "main", "Value for 'HTTP_LOG_PER_REQUEST': {log_per_request}");
-    log_per_request
 }
 
 #[put("/sink")]

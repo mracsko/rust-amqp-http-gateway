@@ -275,6 +275,8 @@ name = "amqp-service"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "bb8",
+ "bb8-lapin",
  "futures",
  "futures-lite",
  "lapin",
@@ -422,6 +424,30 @@ name = "base64"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
+
+[[package]]
+name = "bb8"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1627eccf3aa91405435ba240be23513eeca466b5dc33866422672264de061582"
+dependencies = [
+ "async-trait",
+ "futures-channel",
+ "futures-util",
+ "parking_lot",
+ "tokio",
+]
+
+[[package]]
+name = "bb8-lapin"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5441692a6e0820dd92853f61ab61dd3a44681d3606a4fbefe67cfdad7093a0c9"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "lapin",
+]
 
 [[package]]
 name = "bitflags"

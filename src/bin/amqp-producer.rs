@@ -2,39 +2,62 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use actix_web::{error, post, web, App, Error, HttpResponse, HttpServer};
+use actix_web::{App, error, Error, HttpResponse, HttpServer, post, web};
 use futures_lite::StreamExt;
-use lapin::options::BasicPublishOptions;
-use lapin::{BasicProperties, Channel};
 use log::{error, info};
 
-use amqp_service::bin_utils::{
-    init_amqp_conn_and_queue, init_http_settings, init_logging, init_version, AmqpSettings,
-};
+use amqp_service::amqp::{AmqpChannelWrapper, AmqpConnectionPool};
+use amqp_service::bin_utils::Properties;
 use amqp_service::rest;
 use amqp_service::rest::{create_named_worker, HttpSettings};
 
-const CARGO_BIN_NAME: &'static str = env!("CARGO_BIN_NAME");
+const CARGO_BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const MAX_SIZE: usize = 262_144; // max payload size is 256k
 
 struct HttpWorkerSettings {
     name: String,
 }
 
+struct ProducerProperties {
+    base: Properties,
+}
+
+impl ProducerProperties {
+    fn new() -> Self {
+        let base = Properties::new("main", "PROD");
+        ProducerProperties {
+            base
+        }
+    }
+
+    fn init_version_string(&self, http_settings: &HttpSettings, amqp_pool: &AmqpConnectionPool) -> String {
+        let additional_params: HashMap<String, String> = HashMap::from([
+            ("cores".to_string(), num_cpus::get_physical().to_string()),
+            (
+                "http_workers".to_string(),
+                http_settings.http_workers.to_string(),
+            ),
+            ("amqp_queue".to_string(), amqp_pool.queue_name.to_string()),
+        ]);
+        self.base.init_version(CARGO_BIN_NAME, additional_params)
+    }
+}
+
+
 #[tokio::main]
 async fn main() {
     let start = Instant::now();
-    init_logging();
+    let properties = ProducerProperties::new();
+    properties.base.init_logging();
 
-    info!(target: "main", "Service '{CARGO_BIN_NAME}' is starting...");
+    info!(target: &properties.base.log_target, "Service '{CARGO_BIN_NAME}' is starting...");
 
-    let http_settings = init_http_settings(num_cpus::get_physical());
-    let (conn, amqp_settings) = init_amqp_conn_and_queue().await;
-    let version_string = init_version_string(&http_settings, &amqp_settings);
+    let http_settings = properties.base.init_http_settings_with_core_count();
+    let amqp_pool = properties.base.init_amqp_conn_pool().await;
+    let version_string = properties.init_version_string(&http_settings, &amqp_pool);
 
-    info!(target: "main", "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
+    info!(target: &properties.base.log_target, "Binding HTTP server to '{}' on {} thread(s).", &http_settings.http_addr, http_settings.http_workers);
 
-    let conn = Arc::new(Mutex::new(conn));
     let worker_counter = Arc::new(Mutex::new(0));
     let server = HttpServer::new(move || {
         let name = create_named_worker(&worker_counter, "producer", &start);
@@ -43,22 +66,16 @@ async fn main() {
             .app_data(web::Data::new(rest::VersionJson {
                 json: version_string.clone(),
             }))
-            .app_data(web::Data::new(futures::executor::block_on(async {
-                conn.lock()
-                    .expect("Illegal state, cannot acquire lock")
-                    .create_channel()
-                    .await
-                    .expect("Cannot create AMQP channel.")
-            })))
+            .app_data(web::Data::new(Mutex::new(amqp_pool.new_wrapper(&name))))
             .app_data(web::Data::new(HttpWorkerSettings { name }))
             .service(rest::version)
             .service(send)
     })
-    .workers(http_settings.http_workers)
-    .bind(http_settings.http_addr)
-    .expect("Cannot bind HTTP server");
+        .workers(http_settings.http_workers)
+        .bind(http_settings.http_addr)
+        .expect("Cannot bind HTTP server");
 
-    info!(target: "main", "Service inited in {:?}", start.elapsed());
+    info!(target: &properties.base.log_target, "Service inited in {:?}", start.elapsed());
 
     server
         .run()
@@ -66,24 +83,11 @@ async fn main() {
         .expect("HTTP server could not be started");
 }
 
-fn init_version_string(http_settings: &HttpSettings, amqp_settings: &AmqpSettings) -> String {
-    let additional_params: HashMap<String, String> = HashMap::from([
-        ("cores".to_string(), num_cpus::get_physical().to_string()),
-        (
-            "http_workers".to_string(),
-            http_settings.http_workers.to_string(),
-        ),
-        ("amqp_queue".to_string(), amqp_settings.queue.to_string()),
-    ]);
-    let version_string = init_version(&CARGO_BIN_NAME, additional_params);
-    version_string
-}
-
 #[post("/send")]
 async fn send(
     mut payload: web::Payload,
-    channel: web::Data<Channel>,
-    settings: web::Data<HttpWorkerSettings>,
+    channel: web::Data<Mutex<AmqpChannelWrapper>>,
+    http_settings: web::Data<HttpWorkerSettings>,
 ) -> Result<HttpResponse, Error> {
     let mut body = web::BytesMut::new();
     while let Some(chunk) = payload.next().await {
@@ -94,25 +98,18 @@ async fn send(
         body.extend_from_slice(&chunk);
     }
 
-    match channel
-        .basic_publish(
-            "",
-            "main",
-            BasicPublishOptions::default(),
-            &body,
-            BasicProperties::default(),
-        )
-        .await
-    {
-        Ok(conf) => match conf.await {
-            Ok(_) => {}
-            Err(e) => {
-                error!(target: &settings.name, "Cannot send message due to error: {}", e.to_string());
-                return Err(error::ErrorServiceUnavailable("Cannot send message."));
-            }
-        },
+    let mut channel = match channel.lock() {
+        Ok(channel) => { channel }
         Err(e) => {
-            error!(target: &settings.name, "Cannot send message due to error: {}", e.to_string());
+            error!(target: &http_settings.name, "Cannot send message due to error: {}", e.to_string());
+            return Err(error::ErrorServiceUnavailable("Cannot send message."));
+        }
+    };
+
+    match channel.send(&body).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(target: &http_settings.name, "Cannot send message due to error: {}", e.to_string());
             return Err(error::ErrorServiceUnavailable("Cannot send message."));
         }
     }
